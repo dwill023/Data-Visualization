@@ -1,0 +1,217 @@
+---
+title: "R Notebook"
+output: 
+  html_notebook:
+      code-fold: true
+      code-overflow: wrap
+      embed-resources: true
+execute:
+  warning: false      
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Data Visualization Post
+
+For portfolio at willdesi.com
+
+```{r}
+library(tidyverse)
+library(leaflet)
+
+# below data downloaded from https://www.motherjones.com/politics/2012/12/mass-shootings-mother-jones-full-data/
+df = read_csv("Mother Jones - Mass Shootings Database, 1982 - 2023 - Sheet1.csv")
+
+df = df %>% mutate(gender = case_when(
+    gender %in% "F" ~ "Female",
+    gender %in% "M" ~ "Male",
+    TRUE ~ gender))
+
+df = df %>% mutate(race = case_when(race %in% "-" ~ "Unknown",
+                                    race %in% "black" ~ "Black",
+                                    race %in% "unclear" ~ "Unknown",
+                                    TRUE ~ race))
+# separate the location column into two columns; city and state. Keep the location column
+df = df %>% tidyr::separate(col = location, into = c("city", "state"), sep = ", ", remove = FALSE)
+
+# get the lat and long for the city and state
+df = df %>% geocode(city = city, state = state)
+
+# some lat and long values are NA where the original latitude and longitue are not null. So replace the corresponding NA values in lat and long with those in the other columns.
+df = df %>% mutate(Char1 = coalesce(lat, latitude)) %>%
+    mutate(Char2 = coalesce(long, longitude))
+
+# remove unwanted columns and rename columns ilke location...2 to location
+df = df %>% select(-latitude, -longitude, -lat, -long) %>%
+    rename(location = location...2, latitude = Char1, longitude = Char2)
+
+# save this cleaned data
+write_csv(df, "mother_jones_mass_shootings_updated.csv")
+```
+
+
+```{r paged.print=TRUE}
+DT::datatable(df, rownames = F, filter = "top", options = list(pageLength = 2, scrollX = TRUE
+                                                               )) 
+```
+
+## Maps
+
+```{r fig.height=6, fig.width=8, message=FALSE, warning=FALSE}
+m = leaflet(df)
+m %>%
+    setView(lat = 37.09024, lng = -95.712891, zoom = 4) %>%
+    addProviderTiles("Esri.WorldStreetMap") %>%
+    #addProviderTiles(providers$CartoDB.Positron) %>%
+    addCircles(radius = df$fatalities*1000, 
+               fillOpacity = 0.25,
+               popup = paste0("<strong>Case: </strong>", df$case, "<br>",
+                              "<strong>Date: </strong>", df$date, "<br>",
+                              "<strong>Place: </strong>", df$location, "<br>",
+                              "<strong>Summary: </strong>", df$summary, "<br>",
+                              "<strong>Fatalities: </strong>", df$fatalities, "<br>"))
+```
+
+## Boxplots
+
+Data for the plots
+
+```{r}
+df1 = chickwts %>% mutate(sample = str_c("chick_", 1:n()))
+my_colors = paletteer::paletteer_d("ggthemes::excel_Headlines")
+head(df1)
+```
+
+
+```{r}
+p2 <- ggplot(data = df1, aes(x = feed, y = weight, color = feed)) +
+    geom_boxplot(outlier.shape = NA) + 
+    geom_jitter()+
+    ggthemes::scale_color_calc() +
+    ggthemes::theme_fivethirtyeight() +
+    labs(title = "Chicken Weights by Feed Type",
+         x = "", y = "Weight in Grams")
+p2
+```
+
+```{r}
+p <- ggplot(data = df1, aes(x = feed, y = weight, color = feed,
+                            text = paste0("Sample: ", sample,
+                                          "<br>","Weight: ",
+                                          weight, "g"))) +
+    geom_boxplot(outlier.shape = NA) + 
+    geom_jitter() +
+    scale_color_manual(values = my_colors) +
+    theme_classic() +
+    labs(title = "Chicken Weights by Feed Type",
+         x = "", y = "Weight in Grams")
+
+ggplotly(p, tooltip = "text") %>% 
+    layout(legend = list(orientation = "h"))
+```
+
+```{r}
+fig <- plot_ly(df1, y = ~weight, color = ~feed, type = "box",
+               boxpoints = "all", jitter = 0.3, pointpos = -1.8, 
+               text = paste0("Sample: ", df1$sample, "<br>", "Weight: ", df1$weight, "g"),
+               hoverinfo = 'text')
+
+fig  %>% 
+    layout(legend = list(orientation = "h"),
+           title = list(text = "Chicken Weights by Feed Type"),
+           yaxis = list(title = "Weight(grams)"))
+```
+## Bar plot
+
+
+```{r message=FALSE, warning=FALSE}
+# we first have to compute summary statistics of the data
+df_summary = chickwts %>%
+    group_by(feed) %>%
+    summarise(mean = mean(weight),
+              sd = sd(weight, na.rm = TRUE))
+
+ggplot(df_summary, aes(x = feed, y = mean)) +
+    geom_col(color = "black", fill = my_colors) +
+    geom_errorbar(aes(ymin = mean, ymax=mean + sd), width = 0.2) +
+    labs(title = "Chicken Weights by Feed Type",
+         x = "", y = "Weight in Grams")
+```
+
+## Violin Plots
+
+```{r}
+# starting with a ggplot object
+g <- ggplot(data = df1, aes(x = feed, y = weight, color = feed)) +
+    scale_color_manual(values = my_colors) +
+    scale_fill_manual(values = my_colors)
+
+g2 = g +
+    geom_violin(
+        aes(fill = feed, fill = after_scale(colorspace::lighten(fill, .5))), size = 1) +
+    geom_boxplot(
+        fill = "white",  size = 1, width = .2, outlier.shape = NA, coef = 0) +
+    geom_point(
+        position = position_jitter(width = .03, seed = 0), size = 2, alpha = .5) +
+    geom_point(
+        position = position_jitter(width = .03, seed = 0), size = 2, stroke = .7, shape = 1, color = "black") +
+    theme(legend.position = "none") +
+    labs(title = "Chicken Weights by Feed Type", x = "", y = "Weight in Grams")
+    
+g2
+```
+
+```{r}
+fig <- df1 %>% plot_ly(x = ~feed, y = ~weight, split = ~feed, type = 'violin', box = list(visible = T), 
+                       meanline = list(visible = T), 
+                       points = "all",
+                       text = ~paste("Sample : ", sample , "<br>Weight: ", weight, "g")) %>%
+    layout(legend = list(orientation = "h"),
+           title = list(text = "Chicken Weights by Feed Type"),
+           yaxis = list(title = "Weight in Grams"))
+fig
+```
+## Raincloud Plots
+
+
+```{r fig.height=6, fig.width=7}
+library(PupillometryR)
+my_colors = paletteer::paletteer_d("ggthemes::excel_Headlines")
+
+gg_rain = ggplot(data = df1, aes(x = feed, y = weight, fill = feed, color = feed)) +
+    PupillometryR::geom_flat_violin(position = position_nudge(x = .2), alpha = .4, trim=FALSE) +
+    gghalves::geom_half_point(side = "l", range_scale = .3, alpha = .5, size = 3) +
+    geom_boxplot( width = .2, size = 1, outlier.shape = NA, fill = "white",) +
+    coord_flip() +
+    scale_color_manual(values = my_colors) +
+    scale_fill_manual(values = my_colors) +
+    ggthemes::theme_calc() +
+    theme(legend.position = "none") +
+    labs(title = "Chicken Weights by Feed Type", x = "", y = "Weight in Grams")
+gg_rain
+```
+
+```{r}
+g3 = df1 %>% ggplot(aes(x = feed, y = weight, fill = feed)) +
+    # the half violin
+    ggdist::stat_halfeye(
+    adjust = .5, ## bandwidth
+     .width = c(0.66, 0.95), 
+    position = position_nudge(x = .2), # move geom to the right
+    color = NA, # removes the slab interval
+    scale = 0.5
+  ) +
+    # the boxplot
+    geom_boxplot(width = .2, size = 1, outlier.color = NA, alpha = 0.5) +
+    # the dots
+    ggdist::stat_dots(position = "dodge", scale = 0.5, side = "left", dotsize = 1, justification = 1.2) +
+    ggthemes::theme_calc() +
+    theme(legend.position = "none") +
+    scale_fill_manual(values = my_colors) +
+    labs(title = "Chicken Weights by Feed Type", x = "", y = "Weight in Grams") +
+    coord_flip()
+g3
+```
+
